@@ -1,10 +1,15 @@
+# config.py
+
 import os
 
 # توکن تلگرام
-TELEGRAM_TOKEN = '7799983500:AAGKaoEv5SIE1Ou_dXwib7daEZd9gJWHSfA'
+TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 
 # شناسه چت تلگرام
-CHAT_ID = '@CryptoLivecheck'
+CHAT_ID = os.environ.get('CHAT_ID')
 
 # کلید API NewsAPI
-NEWS_API_KEY = '3788a1f05c7d472a94700d5c35cd465f'
+NEWS_API_KEY = os.environ.get('NEWS_API_KEY')
+
+# کلمات کلیدی حساس برای شناسایی اخبار مهم
+SENSITIVE_KEYWORDS = ['pump', 'surge', 'spike', 'skyrocketing', 'dump', 'fall', 'crash', 'drop']
