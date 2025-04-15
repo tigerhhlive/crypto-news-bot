@@ -1,3 +1,20 @@
+from flask import Flask
+import threading
+import time
+
+app = Flask(__name__)
+
+@app.route('/')
+def hello_world():
+    return 'Crypto News Bot is running.'
+
+def run_flask():
+    app.run(host='0.0.0.0', port=8080)
+
+# اجرای Flask در یک نخ جداگانه
+flask_thread = threading.Thread(target=run_flask)
+flask_thread.start()
+
 import os
 import requests
 import logging
