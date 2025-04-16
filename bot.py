@@ -8,11 +8,8 @@ import json
 import os
 from datetime import datetime
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-from config import TELEGRAM_TOKEN, CHAT_ID, NEWS_API_KEY, SENSITIVE_KEYWORDS, TRUSTED_SOURCES
+from config import TELEGRAM_TOKEN, CHAT_ID, NEWS_API_KEY, SENSITIVE_KEYWORDS, TRUSTED_SOURCES, CRITICAL_NAMES
 
-# -------------------------
-# راه‌اندازی پورت برای Render
-# -------------------------
 app = Flask(__name__)
 
 @app.route('/')
@@ -25,25 +22,19 @@ def run_flask():
 flask_thread = threading.Thread(target=run_flask)
 flask_thread.start()
 
-# -------------------------
-# تنظیمات و ابزارها
-# -------------------------
 logging.basicConfig(level=logging.INFO)
 analyzer = SentimentIntensityAnalyzer()
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
-MAX_MESSAGES_PER_SYMBOL = 2
 CACHE_FILE = "news_cache.json"
+MAX_MESSAGES_PER_SYMBOL = 2
 
 crypto_symbols = [
-    'Bitcoin', 'Ethereum', 'Dogecoin', 'XRP', 'Litecoin',
-    'Cardano', 'Solana', 'Polkadot', 'BinanceCoin', 'Shiba Inu',
-    'Avalanche', 'Polygon', 'Chainlink', 'Uniswap', 'Terra',
-    'Ethereum Classic', 'VeChain', 'Stellar', 'Aptos', 'Arbitrum'
+    'Bitcoin', 'Ethereum', 'Dogecoin', 'XRP',
+    'Cardano', 'Solana', 'Polkadot', 'BinanceCoin', 
+    'Avalanche', 'Polygon', 'Chainlink', 'Uniswap', 
+    'Stellar', 'Aptos', 'Arbitrum', 'AAVE'
 ]
 
-# -------------------------
-# مدیریت Cache
-# -------------------------
 def load_cache():
     if not os.path.exists(CACHE_FILE):
         return set()
@@ -56,9 +47,6 @@ def save_cache(cache):
 
 cache = load_cache()
 
-# -------------------------
-# ارسال پیام به تلگرام
-# -------------------------
 def send_telegram_message(message):
     try:
         bot.send_message(chat_id=CHAT_ID, text=message, parse_mode='Markdown')
@@ -66,95 +54,90 @@ def send_telegram_message(message):
         logging.error(f"❌ Telegram Error: {e}")
         time.sleep(10)
 
-# -------------------------
-# دریافت اخبار
-# -------------------------
-def get_crypto_news(symbol):
-    url = f"https://newsapi.org/v2/everything?q={symbol}&apiKey={NEWS_API_KEY}"
+def get_news(query):
+    url = f"https://newsapi.org/v2/everything?q={query}&sortBy=publishedAt&language=en&apiKey={NEWS_API_KEY}"
     try:
         res = requests.get(url, timeout=10)
         data = res.json()
         return data.get("articles", [])
     except Exception as e:
-        logging.error(f"Error fetching news for {symbol}: {e}")
+        logging.error(f"Error fetching news for query: {query} => {e}")
         return []
 
-# -------------------------
-# سیستم امتیازدهی + کش + احساسات
-# -------------------------
-def analyze_news_and_send(articles, symbol):
-    important_news = []
+def score_news(title, desc, source, symbol=None):
+    score = 0
+    combined = f"{title} {desc}".lower()
 
-    for article in articles:
-        title = article.get('title', '')
-        desc = article.get('description', '')
-        url = article.get('url', '')
-        source = article.get('source', {}).get('name', '')
+    if any(trusted in source for trusted in TRUSTED_SOURCES):
+        score += 1
+    if '?' not in title and not any(w in title.lower() for w in ['might', 'could', 'may']):
+        score += 1
+    score += len([kw for kw in SENSITIVE_KEYWORDS if kw in combined])
+    sentiment = analyzer.polarity_scores(combined)
+    if sentiment['compound'] >= 0.5 or sentiment['compound'] <= -0.5:
+        score += 2
+    if symbol and symbol.lower() in ['bitcoin', 'ethereum', 'bnb']:
+        score += 1
+    if any(name.lower() in combined for name in CRITICAL_NAMES):
+        score += 3
+
+    tags = [kw for kw in CRITICAL_NAMES if kw.lower() in combined]
+    return score, tags, sentiment['compound']
+
+def analyze_and_send(articles, symbol=None):
+    important = []
+    for a in articles:
+        title = a.get('title', '')
+        desc = a.get('description', '')
+        url = a.get('url', '')
+        source = a.get('source', {}).get('name', '')
         content_id = url or title
-
-        # کش: بررسی تکراری بودن
         if content_id in cache:
             continue
-
-        # منبع معتبر؟
-        score = 0
-        if any(trusted in source for trusted in TRUSTED_SOURCES):
-            score += 1
-
-        # حذف تیترهای سوالی/شایعه
-        if '?' in title or any(word in title.lower() for word in ['might', 'could', 'may']):
-            continue
-        else:
-            score += 1
-
-        # تعداد کلمات کلیدی حساس
-        combined = f"{title} {desc}".lower()
-        keyword_hits = [kw for kw in SENSITIVE_KEYWORDS if kw in combined]
-        score += len(keyword_hits)
-
-        # تحلیل احساسات
-        sentiment = analyzer.polarity_scores(combined)
-        if sentiment['compound'] >= 0.5 or sentiment['compound'] <= -0.5:
-            score += 2  # احساس قوی مثبت یا منفی
-
-        # تمرکز روی BTC و ETH
-        if symbol.lower() in ['bitcoin', 'ethereum']:
-            score += 1
-
-        # ارسال اگر امتیاز بالا بود
+        score, tags, sentiment = score_news(title, desc, source, symbol)
         if score >= 5:
-            important_news.append((title, desc, url, score))
+            important.append((title, desc, url, source, tags, score, sentiment))
             cache.add(content_id)
-            if len(important_news) >= MAX_MESSAGES_PER_SYMBOL:
-                break
+        if len(important) >= MAX_MESSAGES_PER_SYMBOL:
+            break
 
-    if important_news:
-        message = f"🚨 *High-Impact News on {symbol}*\n\n"
-        for i, (title, desc, url, score) in enumerate(important_news, 1):
-            message += f"*{i}. {title}*\n{desc}\n🔗 {url}\n🧠 Score: `{score}`\n\n"
-        send_telegram_message(message)
-        logging.info(f"📨 {len(important_news)} trusted alerts sent for {symbol}")
-        time.sleep(2)
+    if important:
+        msg = f"🚨 *High-Impact News {'on ' + symbol if symbol else '[Global]'}*
 
+"
+        for i, (title, desc, url, source, tags, score, sentiment) in enumerate(important, 1):
+            msg += f"*{i}. {title}*
+{desc}
+🔗 {url}
+📡 Source: `{source}`
+🏷 Tags: `{', '.join(tags)}`
+🧠 Score: `{score}` | Sentiment: `{sentiment:.2f}`
+
+"
+        send_telegram_message(msg)
+        logging.info(f"📨 Sent {len(important)} important news.")
         save_cache(cache)
 
-# -------------------------
-# مانیتور اخبار
-# -------------------------
-def monitor():
+def monitor_symbols():
     while True:
         now = datetime.now()
         hour = now.hour
         if 8 <= hour < 24:
             for symbol in crypto_symbols:
-                logging.info(f"🔍 Checking news for {symbol}")
-                articles = get_crypto_news(symbol)
-                if articles:
-                    analyze_news_and_send(articles, symbol)
+                logging.info(f"🔍 Checking symbol news for {symbol}")
+                articles = get_news(symbol)
+                analyze_and_send(articles, symbol)
                 time.sleep(3)
         else:
-            logging.info("😴 Sleeping hours... no checking")
-        time.sleep(60 * 15)
+            logging.info("😴 Symbol monitoring paused (night hours).")
+        time.sleep(900)
 
-monitor_thread = threading.Thread(target=monitor)
-monitor_thread.start()
+def monitor_general():
+    while True:
+        logging.info("🌍 Checking general crypto news")
+        articles = get_news("cryptocurrency OR bitcoin OR crypto")
+        analyze_and_send(articles, None)
+        time.sleep(600)
+
+threading.Thread(target=monitor_symbols).start()
+threading.Thread(target=monitor_general).start()
