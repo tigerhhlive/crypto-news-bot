@@ -3,3 +3,4 @@ python-telegram-bot==13.15
 Flask==2.0.1
 Werkzeug==2.0.1
 vaderSentiment==3.3.2
+python-dateutil==2.8.2
