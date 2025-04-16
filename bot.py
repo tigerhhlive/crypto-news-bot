@@ -6,7 +6,7 @@ import requests
 import telegram
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from config import TELEGRAM_TOKEN, CHAT_ID, NEWS_API_KEY, SENSITIVE_KEYWORDS, TRUSTED_SOURCES, CRITICAL_NAMES
 from dateutil import parser
@@ -72,7 +72,7 @@ def get_news(query):
 def is_recent(published_at, max_minutes=120):
     try:
         pub_time = parser.parse(published_at)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         diff = (now - pub_time).total_seconds() / 60
         return diff <= max_minutes
     except Exception as e:
