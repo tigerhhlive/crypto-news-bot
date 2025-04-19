@@ -132,20 +132,16 @@ def analyze_and_send(articles, symbol=None):
         logging.info(f"📨 Sent {len(important)} important news.")
         save_cache(cache)
 
-# ========== مانیتور رمز ارزها ==========
+# ========== مانیتور رمز ارزها (بدون محدودیت زمانی) ==========
 def monitor_symbols():
     while True:
-        now = datetime.now()
-        hour = now.hour
-        if 8 <= hour < 24:
-            for symbol in crypto_symbols:
-                logging.info(f"🔍 Checking symbol news for {symbol}")
-                articles = get_news(symbol)
-                analyze_and_send(articles, symbol)
-                time.sleep(3)
-        else:
-            logging.info("😴 Symbol monitoring paused (night hours).")
-        time.sleep(900)
+        for symbol in crypto_symbols:
+            logging.info(f"🔍 Checking symbol news for {symbol}")
+            articles = get_news(symbol)
+            analyze_and_send(articles, symbol)
+            time.sleep(3)      # فاصله بین هر کوئری برای حفظ سهمیه API
+        time.sleep(900)       # هر 15 دقیقه یک دور کامل
+
 
 # ========== مانیتور اخبار عمومی بازار ==========
 def monitor_general():
